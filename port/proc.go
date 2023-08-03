@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -68,7 +70,6 @@ func GetPidByPort(protocol, port string) (string, error) {
 
 func findPIDByINode(inode string) (string, error) {
 	procFiles, err := ioutil.ReadDir("/proc")
-
 	if err != nil {
 		return "", err
 	}
@@ -78,28 +79,46 @@ func findPIDByINode(inode string) (string, error) {
 			continue
 		}
 
-		pid := file.Name()
-		fdDir := fmt.Sprintf("/proc/%s/fd", pid)
+		fdDir := "/proc/"
 
-		fdFiles, err := ioutil.ReadDir(fdDir)
-
-		if err != nil {
-			continue
-		}
-
-		for _, fdFile := range fdFiles {
-			targetPath, err := os.Readlink(fmt.Sprintf("/proc/%s/fd/%s", pid, fdFile.Name()))
-
+		err := filepath.Walk(fdDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				fmt.Println("nao achou")
+				return err
 			}
 
-			fmt.Printf("TARGET PATH: %s\n", targetPath)
+			if info.IsDir() {
+				regexPattern := `^/proc/\d+/fd$`
 
-			if strings.HasPrefix(fdFile.Name(), "socket:") && strings.HasSuffix(fdFile.Name(), inode) {
-				return pid, nil
+				regex := regexp.MustCompile(regexPattern)
+
+				if regex.MatchString(path) {
+					p := path
+
+					err := filepath.Walk(p, func(path string, info os.FileInfo, err error) error {
+
+						if !info.IsDir() {
+							targetInode, _ := os.Readlink(fmt.Sprintf("%s/%s", p, info.Name()))
+
+							if strings.Contains(targetInode, inode) {
+								fmt.Printf("INODE: %s\nPID: %s", inode, path)
+							}
+						}
+
+						return nil
+					})
+
+					if err != nil {
+						return err
+					}
+				}
+
 			}
-		}
+
+			return nil
+		})
+
+		return "", err
+
 	}
 
 	return "", nil
